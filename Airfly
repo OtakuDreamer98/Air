@@ -1,0 +1,269 @@
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local PhysicsService = game:GetService("PhysicsService")
+
+local player = Players.LocalPlayer
+local character = player.Character or player.CharacterAdded:Wait()
+local rootPart = character:WaitForChild("HumanoidRootPart")
+
+local platformEnabled = true
+local brick = nil
+local speed = 1
+local holdInterval = 0.1
+local autoMove = { up = false, down = false }
+local fullFollowEnabled = false
+local noclipEnabled = true
+
+-- Setup custom collision group
+pcall(function()
+    if not PhysicsService:CollisionGroupExists("PlayerPlatform") then
+        PhysicsService:CreateCollisionGroup("PlayerPlatform")
+    end
+    PhysicsService:CollisionGroupSetCollidable("PlayerPlatform", "Default", false)
+end)
+
+local function setCharacterCollidable(state)
+    if not character then return end
+    for _, part in ipairs(character:GetDescendants()) do
+        if part:IsA("BasePart") then
+            part.CanCollide = state
+        end
+    end
+end
+
+-- GUI Setup
+local gui = Instance.new("ScreenGui", player:WaitForChild("PlayerGui"))
+gui.Name = "PlatformControlGui"
+gui.ResetOnSpawn = false
+
+local frame = Instance.new("Frame", gui)
+frame.Size = UDim2.new(0, 220, 0, 260)
+frame.Position = UDim2.new(0.7, 0, 0.4, 0)
+frame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+frame.BackgroundTransparency = 0.2
+frame.Active = true
+frame.Draggable = true
+Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 12)
+
+local toggleButton = Instance.new("TextButton", frame)
+toggleButton.Size = UDim2.new(1, -20, 0, 40)
+toggleButton.Position = UDim2.new(0, 10, 0, 10)
+toggleButton.Text = "Disable Platform"
+toggleButton.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+toggleButton.TextColor3 = Color3.new(1, 1, 1)
+Instance.new("UICorner", toggleButton).CornerRadius = UDim.new(0, 8)
+
+local speedBox = Instance.new("TextBox", frame)
+speedBox.Size = UDim2.new(1, -20, 0, 40)
+speedBox.Position = UDim2.new(0, 10, 0, 60)
+speedBox.PlaceholderText = "Speed (default: 1)"
+speedBox.Text = ""
+speedBox.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+speedBox.TextColor3 = Color3.new(1, 1, 1)
+speedBox.ClearTextOnFocus = false
+Instance.new("UICorner", speedBox).CornerRadius = UDim.new(0, 8)
+
+local fullFollowButton = Instance.new("TextButton", frame)
+fullFollowButton.Size = UDim2.new(1, -20, 0, 40)
+fullFollowButton.Position = UDim2.new(0, 10, 0, 110)
+fullFollowButton.Text = "Enable Full Follow"
+fullFollowButton.BackgroundColor3 = Color3.fromRGB(70, 130, 180)
+fullFollowButton.TextColor3 = Color3.new(1, 1, 1)
+Instance.new("UICorner", fullFollowButton).CornerRadius = UDim.new(0, 8)
+
+local teleportButton = Instance.new("TextButton", frame)
+teleportButton.Size = UDim2.new(1, -20, 0, 40)
+teleportButton.Position = UDim2.new(0, 10, 0, 160)
+teleportButton.Text = "Teleport Platform"
+teleportButton.BackgroundColor3 = Color3.fromRGB(180, 90, 90)
+teleportButton.TextColor3 = Color3.new(1, 1, 1)
+Instance.new("UICorner", teleportButton).CornerRadius = UDim.new(0, 8)
+
+local noclipButton = Instance.new("TextButton", frame)
+noclipButton.Size = UDim2.new(1, -20, 0, 40)
+noclipButton.Position = UDim2.new(0, 10, 0, 210)
+noclipButton.Text = "Disable Noclip"
+noclipButton.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
+noclipButton.TextColor3 = Color3.new(1, 1, 1)
+Instance.new("UICorner", noclipButton).CornerRadius = UDim.new(0, 8)
+
+-- Controller GUI in center
+local controllerGui = Instance.new("ScreenGui", player:WaitForChild("PlayerGui"))
+controllerGui.Name = "PlatformControllerGui"
+controllerGui.ResetOnSpawn = false
+
+local controllerFrame = Instance.new("Frame", controllerGui)
+controllerFrame.Size = UDim2.new(0, 120, 0, 120)
+controllerFrame.AnchorPoint = Vector2.new(0.5, 0.5)
+controllerFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
+controllerFrame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+controllerFrame.BackgroundTransparency = 0.3
+controllerFrame.Active = true
+controllerFrame.Draggable = true
+Instance.new("UICorner", controllerFrame).CornerRadius = UDim.new(0, 12)
+
+local upButton = Instance.new("TextButton", controllerFrame)
+upButton.Size = UDim2.new(1, -20, 0, 40)
+upButton.Position = UDim2.new(0, 10, 0, 10)
+upButton.Text = "↑"
+upButton.BackgroundColor3 = Color3.fromRGB(0, 255, 127)
+upButton.TextColor3 = Color3.new(1, 1, 1)
+Instance.new("UICorner", upButton).CornerRadius = UDim.new(0, 8)
+
+local downButton = Instance.new("TextButton", controllerFrame)
+downButton.Size = UDim2.new(1, -20, 0, 40)
+downButton.Position = UDim2.new(0, 10, 0, 70)
+downButton.Text = "↓"
+downButton.BackgroundColor3 = Color3.fromRGB(255, 85, 0)
+downButton.TextColor3 = Color3.new(1, 1, 1)
+Instance.new("UICorner", downButton).CornerRadius = UDim.new(0, 8)
+
+-- Toggle visibility
+local toggleGuiButton = Instance.new("TextButton", frame)
+toggleGuiButton.Size = UDim2.new(1, -20, 0, 30)
+toggleGuiButton.Position = UDim2.new(0, 10, 0, 250)
+toggleGuiButton.Text = "Toggle Controller"
+toggleGuiButton.BackgroundColor3 = Color3.fromRGB(90, 90, 200)
+toggleGuiButton.TextColor3 = Color3.new(1, 1, 1)
+Instance.new("UICorner", toggleGuiButton).CornerRadius = UDim.new(0, 8)
+
+toggleGuiButton.MouseButton1Click:Connect(function()
+    controllerFrame.Visible = not controllerFrame.Visible
+end)
+
+-- Platform logic
+local function createBrick()
+    local b = Instance.new("Part")
+    b.Size = Vector3.new(5, 1, 5)
+    b.Anchored = true
+    b.CanCollide = true
+    b.Position = rootPart.Position - Vector3.new(0, 3.5, 0)
+    b.BrickColor = BrickColor.new("Bright blue")
+    b.Material = Enum.Material.SmoothPlastic
+    b.Name = "PlayerPlatform_" .. player.Name
+    b.Parent = workspace
+    PhysicsService:SetPartCollisionGroup(b, "PlayerPlatform")
+    return b
+end
+
+local connection
+local function updateBrickPosition()
+    if connection then connection:Disconnect() end
+    connection = RunService.Heartbeat:Connect(function()
+        if not platformEnabled or not brick or not character or not character:FindFirstChild("HumanoidRootPart") then
+            if brick then brick:Destroy() brick = nil end
+            if connection then connection:Disconnect() end
+            return
+        end
+        rootPart = character:FindFirstChild("HumanoidRootPart")
+        local y = fullFollowEnabled and rootPart.Position.Y - 3.5 or brick.Position.Y
+        brick.Position = Vector3.new(rootPart.Position.X, y, rootPart.Position.Z)
+    end)
+end
+
+local function startAutoMove(direction)
+    autoMove.up = false
+    autoMove.down = false
+    autoMove[direction] = true
+
+    coroutine.wrap(function()
+        while autoMove[direction] and brick and platformEnabled do
+            local val = tonumber(speedBox.Text)
+            local actualSpeed = (val and val > 0) and val or 1
+            speed = actualSpeed
+            local delta = (direction == "up") and speed or -speed
+            brick.Position += Vector3.new(0, delta * holdInterval, 0)
+            RunService.Heartbeat:Wait()
+        end
+    end)()
+end
+
+toggleButton.MouseButton1Click:Connect(function()
+    platformEnabled = not platformEnabled
+    if platformEnabled then
+        if not brick then
+            brick = createBrick()
+            updateBrickPosition()
+        end
+        toggleButton.Text = "Disable Platform"
+        controllerFrame.Visible = true
+        if noclipEnabled then setCharacterCollidable(false) end
+    else
+        toggleButton.Text = "Enable Platform"
+        if brick then brick:Destroy() brick = nil end
+        controllerFrame.Visible = false
+        autoMove.up = false
+        autoMove.down = false
+        setCharacterCollidable(true)
+    end
+end)
+
+upButton.MouseButton1Click:Connect(function()
+    if autoMove.up then
+        autoMove.up = false
+    else
+        startAutoMove("up")
+    end
+end)
+
+downButton.MouseButton1Click:Connect(function()
+    if autoMove.down then
+        autoMove.down = false
+    else
+        startAutoMove("down")
+    end
+end)
+
+speedBox.FocusLost:Connect(function()
+    local val = tonumber(speedBox.Text)
+    if val and val > 0 then
+        speed = val
+    else
+        speedBox.Text = ""
+        speed = 1
+    end
+end)
+
+fullFollowButton.MouseButton1Click:Connect(function()
+    fullFollowEnabled = not fullFollowEnabled
+    fullFollowButton.Text = fullFollowEnabled and "Disable Full Follow" or "Enable Full Follow"
+end)
+
+teleportButton.MouseButton1Click:Connect(function()
+    if brick and character and character:FindFirstChild("HumanoidRootPart") then
+        brick.Position = rootPart.Position - Vector3.new(0, 3.5, 0)
+    end
+end)
+
+noclipButton.MouseButton1Click:Connect(function()
+    noclipEnabled = not noclipEnabled
+    noclipButton.Text = noclipEnabled and "Disable Noclip" or "Enable Noclip"
+    if platformEnabled then
+        setCharacterCollidable(not noclipEnabled)
+    end
+end)
+
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    if input.KeyCode == Enum.KeyCode.E then
+        toggleButton:Activate()
+    end
+end)
+
+player.CharacterAdded:Connect(function(newChar)
+    character = newChar
+    rootPart = character:WaitForChild("HumanoidRootPart")
+    if brick then brick:Destroy() brick = nil end
+    if platformEnabled then
+        brick = createBrick()
+        updateBrickPosition()
+        if noclipEnabled then setCharacterCollidable(false) end
+    else
+        setCharacterCollidable(true)
+    end
+end)
+
+brick = createBrick()
+updateBrickPosition()
+if noclipEnabled then setCharacterCollidable(false) end
